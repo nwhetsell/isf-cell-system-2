@@ -188,11 +188,6 @@
             "FLOAT": true
         },
         {
-            "TARGET": "bufferD",
-            "PERSISTENT": true,
-            "FLOAT": true
-        },
-        {
 
         }
     ]
@@ -467,24 +462,10 @@ void main()
 
         gl_FragColor = vec4(vel, rho, 1.0);
     }
-    else if (PASSINDEX == 4) // ShaderToy Buffer D
-    {
-        vec2 wrapped_pos = mod(position, RENDERSIZE);
-       	vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_pos).xy);
-
-        wrapped_pos = mod(position - V0 * dt, RENDERSIZE);
-        gl_FragColor = IMG_NORM_PIXEL(bufferD, wrapped_pos / RENDERSIZE);
-        //initial condition
-        if(FRAMEINDEX < 1 || restart)
-        {
-            gl_FragColor.xy = position/RENDERSIZE;
-        }
-    }
     else // ShaderToy Image
     {
         vec2 wrapped_pos = mod(position.xy, RENDERSIZE);
         float r = IMG_NORM_PIXEL(bufferA_positionAndMass, wrapped_pos / RENDERSIZE).z;
-       	// vec4 c = texture(bufferD, mod(position.xy, RENDERSIZE) / RENDERSIZE);
 
        	//get neighbor data
         // vec4 d_u = texelFetch(bufferB, ivec2(mod(position + dx.xy, RENDERSIZE)), 0);
