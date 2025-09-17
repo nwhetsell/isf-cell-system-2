@@ -160,8 +160,6 @@ void main()
 
     if (PASSINDEX == 0 || PASSINDEX == 1) // ShaderToy Buffer A
     {
-        ivec2 p = ivec2(position);
-
         vec2 X = vec2(0);
         vec2 V = vec2(0);
         float M = 0.;
@@ -230,8 +228,6 @@ void main()
     }
     else if (PASSINDEX == 2) // ShaderToy Buffer B
     {
-        vec2 uv = position/RENDERSIZE;
-        ivec2 p = ivec2(position);
         vec2 wrapped_pos = mod(position, RENDERSIZE);
 
         vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
