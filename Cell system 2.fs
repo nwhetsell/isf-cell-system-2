@@ -160,10 +160,11 @@ void main()
         range(i, -2, 2) range(j, -2, 2)
         {
             vec2 tpos = pos + vec2(i,j);
-            vec4 data = texelFetch(bufferA_positionAndMass, ivec2(mod(tpos, R)), 0);
+            vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
+            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
 
             vec2 X0 = POST_UNPACK(data.xy) + tpos;
-           	vec2 V0 = POST_UNPACK(texelFetch(bufferB, ivec2(mod(tpos, R)), 0).xy);
+           	vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_tpos).xy);
            	float M0 = data.z;
 
             X0 += V0*dt; //integrate position
@@ -219,10 +220,11 @@ void main()
     {
         vec2 uv = pos/R;
         ivec2 p = ivec2(pos);
+        vec2 wrapped_pos = mod(pos, RENDERSIZE);
 
-        vec4 data = texelFetch(bufferA_positionAndMass, ivec2(mod(pos, R)), 0);
+        vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
         vec2 X = POST_UNPACK(data.xy) + pos;
-        vec2 V = POST_UNPACK(texelFetch(bufferA_velocity, ivec2(mod(pos, R)), 0).xy);
+        vec2 V = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
         float M = data.z;
 
         if(M != 0.) //not vacuum
@@ -231,20 +233,28 @@ void main()
             vec2 F = vec2(0.);
 
             //get neighbor data
-            vec4 d_u = texelFetch(bufferA_positionAndMass, ivec2(mod(pos + dx.xy, R)), 0);
-            vec4 d_d = texelFetch(bufferA_positionAndMass, ivec2(mod(pos - dx.xy, R)), 0);
-            vec4 d_r = texelFetch(bufferA_positionAndMass, ivec2(mod(pos + dx.yx, R)), 0);
-            vec4 d_l = texelFetch(bufferA_positionAndMass, ivec2(mod(pos - dx.yx, R)), 0);
+            wrapped_pos = mod(pos + dx.xy, R);
+            vec4 d_u = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
+            wrapped_pos = mod(pos - dx.xy, R);
+            vec4 d_d = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
+            wrapped_pos = mod(pos + dx.yx, R);
+            vec4 d_r = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
+            wrapped_pos = mod(pos - dx.yx, R);
+            vec4 d_l = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
 
             //position deltas
             vec2 p_u = POST_UNPACK(d_u.xy), p_d = POST_UNPACK(d_d.xy);
             vec2 p_r = POST_UNPACK(d_r.xy), p_l = POST_UNPACK(d_l.xy);
 
             //velocities
-            vec2 v_u = POST_UNPACK(texelFetch(bufferA_velocity, ivec2(mod(pos + dx.xy, R)), 0).xy);
-            vec2 v_d = POST_UNPACK(texelFetch(bufferA_velocity, ivec2(mod(pos - dx.xy, R)), 0).xy);
-            vec2 v_r = POST_UNPACK(texelFetch(bufferA_velocity, ivec2(mod(pos + dx.yx, R)), 0).xy);
-            vec2 v_l = POST_UNPACK(texelFetch(bufferA_velocity, ivec2(mod(pos - dx.yx, R)), 0).xy);
+            wrapped_pos = mod(pos + dx.xy, R);
+            vec2 v_u = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
+            wrapped_pos = mod(pos - dx.xy, R);
+            vec2 v_d = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
+            wrapped_pos = mod(pos + dx.yx, R);
+            vec2 v_r = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
+            wrapped_pos = mod(pos - dx.yx, R);
+            vec2 v_l = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
 
 
 
@@ -272,7 +282,8 @@ void main()
             {
                 float cang = ang + float(i) * dang;
             	vec2 dir = (1. + sense_dis*pow(M, distance_scale))*Dir(cang);
-            	vec3 s0 = texture(bufferC, mod(X + dir, R) / R).xyz;
+            	vec2 sensedPosition = mod(X + dir, R);
+               	vec3 s0 = IMG_NORM_PIXEL(bufferC, sensedPosition / R).xyz;
        			float fs = pow(s0.z, force_scale);
                 float os = oscil_scale*pow(s0.z - M, oscil_pow);
             	slimeF +=  sense_oscil*Rot(os)*s0.xy
@@ -322,10 +333,11 @@ void main()
         range(i, -2, 2) range(j, -2, 2)
         {
             vec2 tpos = pos + vec2(i,j);
-            vec4 data = texelFetch(bufferA_positionAndMass, ivec2(mod(tpos, R)), 0);
+            vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
+            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
 
             vec2 X0 = POST_UNPACK(data.xy) + tpos;
-            vec2 V0 = POST_UNPACK(texelFetch(bufferB, ivec2(mod(tpos, R)), 0).xy);
+            vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_tpos).xy);
             float M0 = data.z;
             vec2 dx = X0 - pos;
 
@@ -341,19 +353,11 @@ void main()
     }
     else if (PASSINDEX == 4) // ShaderToy Buffer D
     {
-        vec2 V0 = vec2(0.);
-        if(iFrame%1 == 0)
-        {
-            vec4 data = texelFetch(bufferA_positionAndMass, ivec2(mod(pos, R)), 0);
-        	V0 = POST_UNPACK(texelFetch(bufferB, ivec2(mod(pos, R)), 0).xy);
-       		float M0 = data.z;
-        }
-        else
-        {
+        vec2 wrapped_pos = mod(pos, RENDERSIZE);
+       	vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_pos).xy);
 
-        }
-
-        fragColor = texture(bufferD, mod(pos - V0 * dt, R) / R);
+        wrapped_pos = mod(pos - V0 * dt, R);
+        fragColor = IMG_NORM_PIXEL(bufferD, wrapped_pos / R);
         //initial condition
         if(iFrame < 1 || restart)
         {
@@ -362,7 +366,8 @@ void main()
     }
     else // ShaderToy Image
     {
-        float r = texture(bufferA_positionAndMass, mod(pos.xy, R) / R).z;
+        vec2 wrapped_pos = mod(pos.xy, R);
+        float r = IMG_NORM_PIXEL(bufferA_positionAndMass, wrapped_pos / R).z;
        	// vec4 c = texture(bufferD, mod(pos.xy, R) / R);
 
        	//get neighbor data
