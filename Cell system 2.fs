@@ -35,6 +35,134 @@
             "DEFAULT": [0.5, 0.5],
             "MIN": [0, 0],
             "MAX": [1, 1]
+        },
+        {
+            "NAME": "dt",
+            "LABEL": "Simulation speed",
+            "TYPE": "float",
+            "DEFAULT": 1,
+            "MAX": 10,
+            "MIN": 0
+        },
+        {
+            "NAME": "distribution_size",
+            "LABEL": "Distribution size",
+            "TYPE": "float",
+            "DEFAULT": 1.7,
+            "MAX": 10,
+            "MIN": 0
+        },
+        {
+            "NAME": "acceleration",
+            "LABEL": "Acceleration",
+            "TYPE": "float",
+            "DEFAULT": 0,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "sense_ang",
+            "LABEL": "Sensor angle factor",
+            "TYPE": "float",
+            "DEFAULT": 0.03,
+            "MAX": 2,
+            "MIN": 0
+        },
+        {
+            "NAME": "sense_dis",
+            "LABEL": "Sensor distance",
+            "TYPE": "float",
+            "DEFAULT": 15,
+            "MAX": 20,
+            "MIN": 0
+        },
+        {
+            "NAME": "distance_scale",
+            "LABEL": "Sensor distance scale",
+            "TYPE": "float",
+            "DEFAULT": 0,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "sense_oscil",
+            "LABEL": "Sensor turn speed",
+            "TYPE": "float",
+            "DEFAULT": 0,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "oscil_scale",
+            "LABEL": "Sensor turn speed scale",
+            "TYPE": "float",
+            "DEFAULT": 1,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "oscil_pow",
+            "LABEL": "Oscillation power",
+            "TYPE": "float",
+            "DEFAULT": 0,
+            "MAX": 10,
+            "MIN": -10
+        },
+        {
+            "NAME": "sense_force",
+            "LABEL": "Sensor strength",
+            "TYPE": "float",
+            "DEFAULT": 0.38,
+            "MAX": 1,
+            "MIN": -1
+        },
+        {
+            "NAME": "force_scale",
+            "LABEL": "Sensor force scale",
+            "TYPE": "float",
+            "DEFAULT": 1,
+            "MAX": 2,
+            "MIN": 0
+        },
+        {
+            "NAME": "density_normalization_speed",
+            "LABEL": "Density normalization speed",
+            "TYPE": "float",
+            "DEFAULT": 0.13,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "density_target",
+            "LABEL": "Density target",
+            "TYPE": "float",
+            "DEFAULT": 0.24,
+            "MAX": 1,
+            "MIN": 0
+        },
+        {
+            "NAME": "vorticity_confinement",
+            "LABEL": "Vorticity confinement",
+            "TYPE": "float",
+            "DEFAULT": 0,
+            "MAX": 100,
+            "MIN": 0
+        },
+        {
+            "NAME": "massDecayFactor",
+            "LABEL": "Mass decay",
+            "TYPE": "float",
+            "DEFAULT": 1,
+            "MAX": 2,
+            "MIN": 0
+        },
+        {
+            "NAME": "radius",
+            "LABEL": "Smoothing radius",
+            "TYPE": "float",
+            "DEFAULT": 2,
+            "MAX": 10,
+            "MIN": 0
         }
     ],
     "ISFVSN": "2",
@@ -79,10 +207,6 @@
 // ShaderToy Common
 //
 
-#define dt 1.
-
-const vec2 dx = vec2(0, 1);
-
 // Hash function from <https://www.shadertoy.com/view/4djSRW>, MIT-licensed:
 //
 // Copyright © 2014 David Hoskins.
@@ -112,26 +236,7 @@ float hash11(float p)
     return fract(p);
 }
 
-//i.e. diffusion
-#define distribution_size 1.7
-
-//slime mold sensors
-#define sense_num 12
-#define sense_ang 0.03
-#define sense_dis 15.
-//weird oscillation force
-#define sense_oscil 0.0
-#define oscil_scale 1.
-#define oscil_pow 0.
-#define sense_force 0.38
-//slime mold sensor distance power law dist = sense_dispow(rho, pw)
-#define distance_scale 0.0
-#define force_scale 1.
-#define acceleration 0.
-
-#define density_normalization_speed 0.13
-#define density_target 0.24
-#define vorticity_confinement 0.0
+#define HALF_SENSOR_COUNT_MINUS_1 12
 
 //useful functions
 #define GS(x) exp(-dot(x,x))
@@ -146,7 +251,6 @@ float hash11(float p)
 
 //density*temp = pressure - i.e. ideal gas law
 #define Pressure(rho) 0.5*rho.z
-#define fluid_rho 0.2
 
 
 //data packing
@@ -209,6 +313,9 @@ void main()
         M = mix(M, density_target, density_normalization_speed);
         V = V*prevM/M;
 
+        // Mass decay
+        M *= massDecayFactor;
+
         //initial condition
         if(FRAMEINDEX < 1 || restart)
         {
@@ -239,6 +346,7 @@ void main()
         {
             //Compute the force
             vec2 F = vec2(0.);
+            const vec2 dx = vec2(0, 1);
 
             //get neighbor data
             wrapped_pos = mod(position + dx.xy, RENDERSIZE);
@@ -283,10 +391,10 @@ void main()
 
 
             float ang = atan(V.y, V.x);
-            float dang =sense_ang*PI/float(sense_num);
+            float dang =sense_ang*PI/float(HALF_SENSOR_COUNT_MINUS_1);
             vec2 slimeF = vec2(0.);
             //slime mold sensors
-            range(i, -sense_num, sense_num)
+            range(i, -HALF_SENSOR_COUNT_MINUS_1, HALF_SENSOR_COUNT_MINUS_1)
             {
                 float cang = ang + float(i) * dang;
             	vec2 dir = (1. + sense_dis*pow(M, distance_scale))*Dir(cang);
@@ -300,7 +408,7 @@ void main()
 
             //remove acceleration component from slime force and leave rotation only
             slimeF -= dot(slimeF, normalize(V))*normalize(V);
-    		F += slimeF/float(2*sense_num);
+    		F += slimeF/float(2*HALF_SENSOR_COUNT_MINUS_1);
 
             // TODO
             // if(iMouse.z > 0.)
@@ -349,7 +457,6 @@ void main()
             float M0 = data.z;
             vec2 dx = X0 - position;
 
-#define radius 2.
             float K = GS(dx/radius)/(radius);
             rho += M0*K;
             vel += M0*K*V0;
