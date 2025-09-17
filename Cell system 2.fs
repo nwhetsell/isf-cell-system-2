@@ -202,6 +202,16 @@
 // Constants and functions from LYGIA <https://github.com/patriciogonzalezvivo/lygia>
 #define PI 3.1415926535897932384626433832795
 
+vec2 polar2cart(in vec2 polar) {
+    return vec2(cos(polar.x), sin(polar.x)) * polar.y;
+}
+
+mat2 rotate2d(const in float r) {
+    float c = cos(r);
+    float s = sin(r);
+    return mat2(c, s, -s, c);
+}
+
 
 //
 // ShaderToy Common
@@ -240,17 +250,6 @@ float hash11(float p)
 
 //useful functions
 #define GS(x) exp(-dot(x,x))
-#define GSS(x) exp(-dot(x,x))
-#define GS0(x) exp(-length(x))
-#define Dir(ang) vec2(cos(ang), sin(ang))
-#define Rot(ang) mat2(cos(ang), sin(ang), -sin(ang), cos(ang))
-#define loop(i,x) for(int i = 0; i < x; i++)
-#define range(i,a,b) for(int i = a; i <= b; i++)
-
-//SPH pressure
-
-//density*temp = pressure - i.e. ideal gas law
-#define Pressure(rho) 0.5*rho.z
 
 
 //data packing
@@ -271,8 +270,8 @@ void main()
         //basically integral over all updated neighbor distributions
         //that fall inside of this pixel
         //this makes the tracking conservative
-        range(i, -2, 2) range(j, -2, 2)
-        {
+        for (int i = -2; i <= 2; i++)
+        for (int j = -2; j <= 2; j++) {
             vec2 tpos = position + vec2(i,j);
             vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
             vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
@@ -321,8 +320,11 @@ void main()
         {
             X = position;
             vec2 dx0 = (position - RENDERSIZE*0.3); vec2 dx1 = (position - RENDERSIZE*0.7);
-            V = 0.5*Rot(PI*0.5)*dx0*GS(dx0/30.) - 0.5*Rot(PI*0.5)*dx1*GS(dx1/30.);
-            V += 1.0*Dir(2.*PI*hash11(floor(position.x/10.) + RENDERSIZE.x*floor(position.y/20.)));
+            V = 0.5*rotate2d(PI*0.5)*dx0*GS(dx0/30.) - 0.5*rotate2d(PI*0.5)*dx1*GS(dx1/30.);
+            V += polar2cart(vec2(
+                2. * PI * hash11(floor(position.x / 10.) + RENDERSIZE.x * floor(position.y / 20.)),
+                1
+            ));
             M = 0.1 + position.x/RENDERSIZE.x*0.01 + position.y/RENDERSIZE.x*0.01;
         }
 
@@ -375,12 +377,12 @@ void main()
 
 
             //pressure gradient
-            vec2 p = vec2(Pressure(d_r) - Pressure(d_l),
-                          Pressure(d_u) - Pressure(d_d));
+            vec2 p = 0.5 * vec2(d_r.z - d_l.z,
+                                d_u.z - d_d.z);
 
             //density gradient
             vec2 dgrad = vec2(d_r.z - d_l.z,
-                          d_u.z - d_d.z);
+                              d_u.z - d_d.z);
 
             //velocity operators
             float div = v_r.x - v_l.x + v_u.y - v_d.y;
@@ -394,16 +396,15 @@ void main()
             float dang =sense_ang*PI/float(HALF_SENSOR_COUNT_MINUS_1);
             vec2 slimeF = vec2(0.);
             //slime mold sensors
-            range(i, -HALF_SENSOR_COUNT_MINUS_1, HALF_SENSOR_COUNT_MINUS_1)
-            {
+            for (int i = -HALF_SENSOR_COUNT_MINUS_1; i <= HALF_SENSOR_COUNT_MINUS_1; i++) {
                 float cang = ang + float(i) * dang;
-            	vec2 dir = (1. + sense_dis*pow(M, distance_scale))*Dir(cang);
+            	vec2 dir = polar2cart(vec2(cang, 1. + sense_dis * pow(M, distance_scale)));
             	vec2 sensedPosition = mod(X + dir, RENDERSIZE);
                	vec3 s0 = IMG_NORM_PIXEL(bufferC, sensedPosition / RENDERSIZE).xyz;
        			float fs = pow(s0.z, force_scale);
                 float os = oscil_scale*pow(s0.z - M, oscil_pow);
-            	slimeF +=  sense_oscil*Rot(os)*s0.xy
-                         + sense_force*Dir(ang + sign(float(i))*PI*0.5)*fs;
+            	slimeF +=  sense_oscil*rotate2d(os)*s0.xy
+                         + polar2cart(vec2(ang + sign(float(i))*PI*0.5, sense_force*fs));
             }
 
             //remove acceleration component from slime force and leave rotation only
@@ -414,11 +415,11 @@ void main()
             // if(iMouse.z > 0.)
             // {
             //     vec2 dx= position - iMouse.xy;
-            //      F += 0.1*Rot(PI*0.5)*dx*GS(dx/30.);
+            //      F += 0.1*rotate2d(PI*0.5)*dx*GS(dx/30.);
             // }
 
             //integrate velocity
-            V += Rot(-vorticity_confinement*curl)*F*dt/M;
+            V += rotate2d(-vorticity_confinement*curl)*F*dt/M;
 
             //acceleration for fun effects
             V *= 1. + acceleration;
@@ -446,8 +447,8 @@ void main()
         vec2 vel = vec2(0., 0.);
 
         //compute the smoothed density and velocity
-        range(i, -2, 2) range(j, -2, 2)
-        {
+        for (int i = -2; i <= 2; i++)
+        for (int j = -2; j <= 2; j++) {
             vec2 tpos = position + vec2(i,j);
             vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
             vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
@@ -500,8 +501,8 @@ void main()
         // vec2 v_r = DECODE(d_r.y), v_l = DECODE(d_l.y);
 
         // //pressure gradient
-        // vec2 p = vec2(Pressure(d_r) - Pressure(d_l),
-        //                 Pressure(d_u) - Pressure(d_d));
+        // vec2 p = 0.5 * vec2(d_r.z - d_l.z,
+        //                     d_u.z - d_d.z);
 
         // //velocity operators
         // float div = (v_r.x - v_l.x + v_u.y - v_d.y);
