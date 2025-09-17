@@ -81,13 +81,6 @@
 // ShaderToy Common
 //
 
-#define T_A(p) texelFetch(bufferB, ivec2(mod(p,R)), 0)
-#define T_B(p) texelFetch(bufferA, ivec2(mod(p,R)), 0)
-#define P(p) texture(bufferB, mod(p,R)/R)
-#define C_B(p) texture(bufferC, mod(p,R)/R)
-#define C_D(p) texture(bufferD, mod(p,R)/R)
-#define D(p) texture(iChannel2, mod(p,R)/R)
-
 #define dt 1.
 #define R iResolution.xy
 
@@ -169,7 +162,7 @@ void main()
         range(i, -2, 2) range(j, -2, 2)
         {
             vec2 tpos = pos + vec2(i,j);
-            vec4 data = T_A(tpos);
+            vec4 data = texelFetch(bufferB, ivec2(mod(tpos, R)), 0);
 
             vec2 X0 = DECODE(data.x) + tpos;
            	vec2 V0 = DECODE(data.y);
@@ -225,7 +218,7 @@ void main()
         vec2 uv = pos/R;
         ivec2 p = ivec2(pos);
 
-        vec4 data = T_B(pos);
+        vec4 data = texelFetch(bufferA, ivec2(mod(pos, R)), 0);
         vec2 X = DECODE(data.x) + pos;
         vec2 V = DECODE(data.y);
         float M = data.z;
@@ -236,8 +229,10 @@ void main()
             vec2 F = vec2(0.);
 
             //get neighbor data
-            vec4 d_u = T_B(pos + dx.xy), d_d = T_B(pos - dx.xy);
-            vec4 d_r = T_B(pos + dx.yx), d_l = T_B(pos - dx.yx);
+            vec4 d_u = texelFetch(bufferA, ivec2(mod(pos + dx.xy, R)), 0);
+            vec4 d_d = texelFetch(bufferA, ivec2(mod(pos - dx.xy, R)), 0);
+            vec4 d_r = texelFetch(bufferA, ivec2(mod(pos + dx.yx, R)), 0);
+            vec4 d_l = texelFetch(bufferA, ivec2(mod(pos - dx.yx, R)), 0);
 
             //position deltas
             vec2 p_u = DECODE(d_u.x), p_d = DECODE(d_d.x);
@@ -273,7 +268,7 @@ void main()
             {
                 float cang = ang + float(i) * dang;
             	vec2 dir = (1. + sense_dis*pow(M, distance_scale))*Dir(cang);
-            	vec3 s0 = C_B(X + dir).xyz;
+            	vec3 s0 = texture(bufferC, mod(X + dir, R) / R).xyz;
        			float fs = pow(s0.z, force_scale);
                 float os = oscil_scale*pow(s0.z - M, oscil_pow);
             	slimeF +=  sense_oscil*Rot(os)*s0.xy
@@ -324,7 +319,7 @@ void main()
         range(i, -2, 2) range(j, -2, 2)
         {
             vec2 tpos = pos + vec2(i,j);
-            vec4 data = T_A(tpos);
+            vec4 data = texelFetch(bufferB, ivec2(mod(tpos, R)), 0);
 
             vec2 X0 = DECODE(data.x) + tpos;
             vec2 V0 = DECODE(data.y);
@@ -346,7 +341,7 @@ void main()
         vec2 V0 = vec2(0.);
         if(iFrame%1 == 0)
         {
-        	vec4 data = T_A(pos);
+        	vec4 data = texelFetch(bufferB, ivec2(mod(pos, R)), 0);
         	V0 = 1.*DECODE(data.y);
        		float M0 = data.z;
         }
@@ -355,7 +350,7 @@ void main()
 
         }
 
-        fragColor = C_D(pos - V0*dt);
+        fragColor = texture(bufferD, mod(pos - V0 * dt, R) / R);
         //initial condition
         if(iFrame < 1 || restart)
         {
@@ -364,12 +359,14 @@ void main()
     }
     else // ShaderToy Image
     {
-        float r = P(pos.xy).z;
-       	vec4 c = C_D(pos.xy);
+        float r = texture(bufferB, mod(pos.xy, R) / R).z;
+       	vec4 c = texture(bufferD, mod(pos.xy, R) / R);
 
        	//get neighbor data
-        vec4 d_u = T_A(pos + dx.xy), d_d = T_A(pos - dx.xy);
-        vec4 d_r = T_A(pos + dx.yx), d_l = T_A(pos - dx.yx);
+        vec4 d_u = texelFetch(bufferB, ivec2(mod(pos + dx.xy, R)), 0);
+        vec4 d_d = texelFetch(bufferB, ivec2(mod(pos - dx.xy, R)), 0);
+        vec4 d_r = texelFetch(bufferB, ivec2(mod(pos + dx.yx, R)), 0);
+        vec4 d_l = texelFetch(bufferB, ivec2(mod(pos - dx.yx, R)), 0);
 
         //position deltas
         vec2 p_u = DECODE(d_u.x), p_d = DECODE(d_d.x);
