@@ -296,7 +296,7 @@ void main()
                 min(position + 0.5, X0 + 0.5 * distribution_size)
             );
             vec2 center = 0.5 * (aabbX.xy + aabbX.zw); // Center of mass
-            vec2 size = max(aabbX.zw - aabbX.xy, 0); // Only positive
+            vec2 size = max(aabbX.zw - aabbX.xy, 0.); // Only positive
 
             // Deposited mass into this cell
             float m = M0 * size.x * size.y / (distribution_size * distribution_size);
