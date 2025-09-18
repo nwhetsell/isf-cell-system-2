@@ -1,3 +1,7 @@
+<p align="center">
+  <img width="423" alt="Screenshot" src="https://github.com/user-attachments/assets/a2df02d5-db58-40a8-8904-c3663483841e" />
+</p>
+
 This is an [ISF shader](https://isf.video) for simulating a cell system,
 converted from [this ShaderToy shader](https://www.shadertoy.com/view/3tSfRW) by
 [**@MichaelMoroz**](https://github.com/MichaelMoroz).
