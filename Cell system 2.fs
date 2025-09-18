@@ -251,9 +251,6 @@ float hash11(float p)
 
 #define HALF_SENSOR_COUNT_MINUS_1 12
 
-//useful functions
-#define GS(x) exp(-dot(x,x))
-
 // The ShaderToy shader uses the functions `floatBitsToUint` and
 // `uintBitsToFloat` to pack more than 4 floats (5 in this case) into a
 // 4-component pixel. These functions are available in GLSL v3.30 (OpenGL v3.3)
@@ -451,7 +448,8 @@ void main()
     else // ShaderToy Image
     {
         vec2 wrappedPosition = mod(position.xy, RENDERSIZE);
-        float r = IMG_NORM_PIXEL(bufferA_positionAndMass, wrappedPosition / RENDERSIZE).z;
-        gl_FragColor = vec4(sin(1.2 * vec3(1, 2, 3) * r), 1);
+        float rho = IMG_NORM_PIXEL(bufferA_positionAndMass, wrappedPosition / RENDERSIZE).z;
+
+        gl_FragColor = vec4(sin(rho * 1.2 * vec3(1, 2, 3)), 1);
     }
 }
