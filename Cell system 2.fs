@@ -193,9 +193,17 @@
     ]
 }*/
 
+#define INV_SQRT_2 0.7071067811865475244008443621048
 
 // Constants and functions from LYGIA <https://github.com/patriciogonzalezvivo/lygia>
 #define PI 3.1415926535897932384626433832795
+#define HALF_PI 1.5707963267948966192313216916398
+#define TWO_PI 6.2831853071795864769252867665590
+
+float gaussian( vec2 d, float s) { return exp(-( d.x*d.x + d.y*d.y) / (2.0 * s*s)); }
+
+float luminance(in vec3 linear) { return dot(linear, vec3(0.21250175, 0.71537574, 0.07212251)); }
+float luminance(in vec4 linear) { return luminance( linear.rgb ); }
 
 vec2 polar2cart(in vec2 polar) {
     return vec2(cos(polar.x), sin(polar.x)) * polar.y;
@@ -246,8 +254,14 @@ float hash11(float p)
 //useful functions
 #define GS(x) exp(-dot(x,x))
 
-
-//data packing
+// The ShaderToy shader uses the functions `floatBitsToUint` and
+// `uintBitsToFloat` to pack more than 4 floats (5 in this case) into a
+// 4-component pixel. These functions are available in GLSL v3.30 (OpenGL v3.3)
+// and later, but some ISF hosts (notably Videosync) use GLSL v1.50
+// (OpenGL v3.2). We can work around this by effectively running one of the
+// ShaderToy buffers twice, but the packing operations in the ShaderToy shader
+// also perform a `clamp` on the packed data. Without the `clamp` calls, this
+// shader seems to blow up numerically.
 #define POST_UNPACK(X) (clamp(X, 0., 1.) * 2. - 1.)
 #define PRE_PACK(X) clamp(0.5 * X + 0.5, 0., 1.)
 
@@ -262,236 +276,182 @@ void main()
         vec2 V = vec2(0);
         float M = 0.;
 
-        //basically integral over all updated neighbor distributions
-        //that fall inside of this pixel
-        //this makes the tracking conservative
+        // Basically integrate over all updated neighbor distributions that fall
+        // inside of this pixel. This makes the tracking conservative.
         for (int i = -2; i <= 2; i++)
         for (int j = -2; j <= 2; j++) {
-            vec2 tpos = position + vec2(i,j);
-            vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
-            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
+            vec2 translatedPosition = position + vec2(i, j);
+            vec2 wrappedPosition = mod(translatedPosition, RENDERSIZE);
+            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
 
-            vec2 X0 = POST_UNPACK(data.xy) + tpos;
-           	vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_tpos).xy);
-           	float M0 = data.z;
+            vec2 X0 = POST_UNPACK(data.xy) + translatedPosition;
+            vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrappedPosition).xy);
+            float M0 = data.z;
 
-            X0 += V0*dt; //integrate position
+            X0 += V0 * dt; // Integrate position
 
-            //particle distribution size
-            float K = distribution_size;
+            // Overlap aabb
+            vec4 aabbX = vec4(
+                max(position - 0.5, X0 - 0.5 * distribution_size),
+                min(position + 0.5, X0 + 0.5 * distribution_size)
+            );
+            vec2 center = 0.5 * (aabbX.xy + aabbX.zw); // Center of mass
+            vec2 size = max(aabbX.zw - aabbX.xy, 0); // Only positive
 
-            vec4 aabbX = vec4(max(position - 0.5, X0 - K*0.5), min(position + 0.5, X0 + K*0.5)); //overlap aabb
-            vec2 center = 0.5*(aabbX.xy + aabbX.zw); //center of mass
-            vec2 size = max(aabbX.zw - aabbX.xy, 0.); //only positive
+            // Deposited mass into this cell
+            float m = M0 * size.x * size.y / (distribution_size * distribution_size);
 
-            //the deposited mass into this cell
-            float m = M0*size.x*size.y/(K*K);
+            // Add weighted by mass
+            X += center * m;
+            V += V0 * m;
 
-            //add weighted by mass
-            X += center*m;
-            V += V0*m;
-
-            //add mass
+            // Add mass
             M += m;
         }
 
-        //normalization
-        if(M != 0.)
-        {
+        // Normalization
+        if (M != 0.) {
             X /= M;
             V /= M;
         }
 
-        //mass renormalization
+        float inputLuminance = luminance(IMG_PIXEL(inputImage, position));
+        M += inputImageAmount * inputLuminance;
+        V += inputImageAmount * inputLuminance;
+
+        // Mass renormalization
         float prevM = M;
         M = mix(M, density_target, density_normalization_speed);
-        V = V*prevM/M;
+        V = V * prevM / M;
 
         // Mass decay
         M *= massDecayFactor;
 
-        //initial condition
-        if(FRAMEINDEX < 1 || restart)
-        {
+        // Initial condition
+        if (FRAMEINDEX < 1 || restart) {
             X = position;
-            vec2 dx0 = (position - RENDERSIZE*0.3); vec2 dx1 = (position - RENDERSIZE*0.7);
-            V = 0.5*rotate2d(PI*0.5)*dx0*GS(dx0/30.) - 0.5*rotate2d(PI*0.5)*dx1*GS(dx1/30.);
+
+            vec2 dx0 = position - 0.3 * RENDERSIZE;
+            vec2 dx1 = position - 0.7 * RENDERSIZE;
+            V = 0.5 * rotate2d(HALF_PI) * (dx0 * gaussian(dx0 / 30., INV_SQRT_2) - dx1 * gaussian(dx1 / 30., INV_SQRT_2));
             V += polar2cart(vec2(
-                2. * PI * hash11(floor(position.x / 10.) + RENDERSIZE.x * floor(position.y / 20.)),
+                TWO_PI * hash11(floor(position.x / 10.) + RENDERSIZE.x * floor(position.y / 20.)),
                 1
             ));
-            M = 0.1 + position.x/RENDERSIZE.x*0.01 + position.y/RENDERSIZE.x*0.01;
+
+            M = 0.1 + 0.01 * (position.x + position.y) / RENDERSIZE.x;
         }
 
         if (PASSINDEX == 0) {
             X = clamp(X - position, vec2(-0.5), vec2(0.5));
-            gl_FragColor = vec4(PRE_PACK(X), M, 1.);
+            gl_FragColor = vec4(PRE_PACK(X), M, 1);
         } else {
-            gl_FragColor = vec4(PRE_PACK(V), 0., 1.);
+            gl_FragColor = vec4(PRE_PACK(V), 0, 1);
         }
     }
     else if (PASSINDEX == 2) // ShaderToy Buffer B
     {
-        vec2 wrapped_pos = mod(position, RENDERSIZE);
+        vec2 wrappedPosition = mod(position, RENDERSIZE);
 
-        vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
+        vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
         vec2 X = POST_UNPACK(data.xy) + position;
-        vec2 V = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
+        vec2 V = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrappedPosition).xy);
         float M = data.z;
 
-        if(M != 0.) //not vacuum
-        {
-            //Compute the force
-            vec2 F = vec2(0.);
+        if (M != 0.) { // Not vacuum
+            // Compute the force
+            vec2 F = vec2(0);
+
+            // Get neighbor data
             const vec2 dx = vec2(0, 1);
+            wrappedPosition = mod(position + dx.xy, RENDERSIZE);
+            vec4 d_u = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
+            vec2 v_u = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrappedPosition).xy);
+            wrappedPosition = mod(position - dx.xy, RENDERSIZE);
+            vec4 d_d = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
+            vec2 v_d = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrappedPosition).xy);
+            wrappedPosition = mod(position + dx.yx, RENDERSIZE);
+            vec4 d_r = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
+            vec2 v_r = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrappedPosition).xy);
+            wrappedPosition = mod(position - dx.yx, RENDERSIZE);
+            vec4 d_l = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
+            vec2 v_l = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrappedPosition).xy);
 
-            //get neighbor data
-            wrapped_pos = mod(position + dx.xy, RENDERSIZE);
-            vec4 d_u = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
-            wrapped_pos = mod(position - dx.xy, RENDERSIZE);
-            vec4 d_d = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
-            wrapped_pos = mod(position + dx.yx, RENDERSIZE);
-            vec4 d_r = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
-            wrapped_pos = mod(position - dx.yx, RENDERSIZE);
-            vec4 d_l = IMG_PIXEL(bufferA_positionAndMass, wrapped_pos);
+            // Pressure gradient
+            vec2 p = 0.5 * vec2(d_r.z - d_l.z, d_u.z - d_d.z);
 
-            //position deltas
-            vec2 p_u = POST_UNPACK(d_u.xy), p_d = POST_UNPACK(d_d.xy);
-            vec2 p_r = POST_UNPACK(d_r.xy), p_l = POST_UNPACK(d_l.xy);
-
-            //velocities
-            wrapped_pos = mod(position + dx.xy, RENDERSIZE);
-            vec2 v_u = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
-            wrapped_pos = mod(position - dx.xy, RENDERSIZE);
-            vec2 v_d = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
-            wrapped_pos = mod(position + dx.yx, RENDERSIZE);
-            vec2 v_r = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
-            wrapped_pos = mod(position - dx.yx, RENDERSIZE);
-            vec2 v_l = POST_UNPACK(IMG_PIXEL(bufferA_velocity, wrapped_pos).xy);
-
-
-
-            //pressure gradient
-            vec2 p = 0.5 * vec2(d_r.z - d_l.z,
-                                d_u.z - d_d.z);
-
-            //density gradient
-            vec2 dgrad = vec2(d_r.z - d_l.z,
-                              d_u.z - d_d.z);
-
-            //velocity operators
-            float div = v_r.x - v_l.x + v_u.y - v_d.y;
+            // Velocity operators
             float curl = v_r.y - v_l.y - v_u.x + v_d.x;
-            //vec2 laplacian =
 
-            F -= 1.0*M*p;
-
+            F -= M * p;
 
             float ang = atan(V.y, V.x);
-            float dang =sense_ang*PI/float(HALF_SENSOR_COUNT_MINUS_1);
-            vec2 slimeF = vec2(0.);
-            //slime mold sensors
+            float dang = sense_ang * PI / float(HALF_SENSOR_COUNT_MINUS_1);
+            vec2 slimeF = vec2(0);
+            // Slime mold sensors
             for (int i = -HALF_SENSOR_COUNT_MINUS_1; i <= HALF_SENSOR_COUNT_MINUS_1; i++) {
                 float cang = ang + float(i) * dang;
-            	vec2 dir = polar2cart(vec2(cang, 1. + sense_dis * pow(M, distance_scale)));
-            	vec2 sensedPosition = mod(X + dir, RENDERSIZE);
-               	vec3 s0 = IMG_NORM_PIXEL(bufferC, sensedPosition / RENDERSIZE).xyz;
-       			float fs = pow(s0.z, force_scale);
-                float os = oscil_scale*pow(s0.z - M, oscil_pow);
-            	slimeF +=  sense_oscil*rotate2d(os)*s0.xy
-                         + polar2cart(vec2(ang + sign(float(i))*PI*0.5, sense_force*fs));
+                vec2 dir = polar2cart(vec2(cang, 1. + sense_dis * pow(M, distance_scale)));
+                vec2 sensedPosition = mod(X + dir, RENDERSIZE);
+                vec4 s0 = IMG_NORM_PIXEL(bufferC, sensedPosition / RENDERSIZE);
+                slimeF += rotate2d(oscil_scale * pow(s0.z - M, oscil_pow)) * s0.xy * sense_oscil +
+                          polar2cart(vec2(ang + sign(float(i)) * HALF_PI, sense_force * pow(s0.z, force_scale)));
             }
 
-            //remove acceleration component from slime force and leave rotation only
-            slimeF -= dot(slimeF, normalize(V))*normalize(V);
-    		F += slimeF/float(2*HALF_SENSOR_COUNT_MINUS_1);
+            // Remove acceleration component from slime force and leave rotation only
+            slimeF -= dot(slimeF, normalize(V)) * normalize(V);
+            F += slimeF / float(2 * HALF_SENSOR_COUNT_MINUS_1);
 
-            // TODO
-            // if(iMouse.z > 0.)
-            // {
-            //     vec2 dx= position - iMouse.xy;
-            //      F += 0.1*rotate2d(PI*0.5)*dx*GS(dx/30.);
-            // }
+            if (enableMouse) {
+                vec2 dx = position - mouse * RENDERSIZE;
+                F += 0.1 * rotate2d(HALF_PI) * dx * gaussian(dx / 30., INV_SQRT_2);
+            }
 
-            //integrate velocity
-            V += rotate2d(-vorticity_confinement*curl)*F*dt/M;
+            // Integrate velocity
+            V += rotate2d(-vorticity_confinement * curl) * F * dt / M;
 
-            //acceleration for fun effects
+            // Acceleration for fun effects
             V *= 1. + acceleration;
 
-            //velocity limit
+            // Velocity limit
             float v = length(V);
-            V /= (v > 1.)?v/1.:1.;
+            if (v > 1.) {
+                V /= v;
+            }
         }
 
-        //mass decay
-       // M *= 0.999;
-
-        //input
-        //if(iMouse.z > 0.)
-        //\\	M = mix(M, 0.5, GS((position - iMouse.xy)/13.));
-        //else
-         //   M = mix(M, 0.5, GS((position - RENDERSIZE*0.5)/13.));
-
-        //save
-        gl_FragColor = vec4(PRE_PACK(V), 0., 1.);
+        gl_FragColor = vec4(PRE_PACK(V), 0, 1);
     }
     else if (PASSINDEX == 3) // ShaderToy Buffer C
     {
         float rho = 0.001;
-        vec2 vel = vec2(0., 0.);
+        vec2 vel = vec2(0);
 
-        //compute the smoothed density and velocity
+        // Compute the smoothed density and velocity
         for (int i = -2; i <= 2; i++)
         for (int j = -2; j <= 2; j++) {
-            vec2 tpos = position + vec2(i,j);
-            vec2 wrapped_tpos = mod(tpos, RENDERSIZE);
-            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrapped_tpos);
+            vec2 translatedPosition = position + vec2(i, j);
+            vec2 wrappedPosition = mod(translatedPosition, RENDERSIZE);
+            vec4 data = IMG_PIXEL(bufferA_positionAndMass, wrappedPosition);
 
-            vec2 X0 = POST_UNPACK(data.xy) + tpos;
-            vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrapped_tpos).xy);
+            vec2 X0 = POST_UNPACK(data.xy) + translatedPosition;
+            vec2 V0 = POST_UNPACK(IMG_PIXEL(bufferB, wrappedPosition).xy);
             float M0 = data.z;
             vec2 dx = X0 - position;
 
-            float K = GS(dx/radius)/(radius);
-            rho += M0*K;
-            vel += M0*K*V0;
+            float K = gaussian(dx, radius * INV_SQRT_2) / radius;
+            rho += M0 * K;
+            vel += M0 * K * V0;
         }
 
         vel /= rho;
 
-        gl_FragColor = vec4(vel, rho, 1.0);
+        gl_FragColor = vec4(vel, rho, 1);
     }
     else // ShaderToy Image
     {
-        vec2 wrapped_pos = mod(position.xy, RENDERSIZE);
-        float r = IMG_NORM_PIXEL(bufferA_positionAndMass, wrapped_pos / RENDERSIZE).z;
-
-       	//get neighbor data
-        // vec4 d_u = texelFetch(bufferB, ivec2(mod(position + dx.xy, RENDERSIZE)), 0);
-        // vec4 d_d = texelFetch(bufferB, ivec2(mod(position - dx.xy, RENDERSIZE)), 0);
-        // vec4 d_r = texelFetch(bufferB, ivec2(mod(position + dx.yx, RENDERSIZE)), 0);
-        // vec4 d_l = texelFetch(bufferB, ivec2(mod(position - dx.yx, RENDERSIZE)), 0);
-
-        // //position deltas
-        // vec2 p_u = DECODE(d_u.x), p_d = DECODE(d_d.x);
-        // vec2 p_r = DECODE(d_r.x), p_l = DECODE(d_l.x);
-
-        // //velocities
-        // vec2 v_u = DECODE(d_u.y), v_d = DECODE(d_d.y);
-        // vec2 v_r = DECODE(d_r.y), v_l = DECODE(d_l.y);
-
-        // //pressure gradient
-        // vec2 p = 0.5 * vec2(d_r.z - d_l.z,
-        //                     d_u.z - d_d.z);
-
-        // //velocity operators
-        // float div = (v_r.x - v_l.x + v_u.y - v_d.y);
-        // float curl = (v_r.y - v_l.y - v_u.x + v_d.x);
-
-
-       	gl_FragColor=sin(vec4(1,2,3,4)*1.2*r);
-        gl_FragColor.a = 1.;
-       	//col.xyz += vec3(1,0.1,0.1)*max(curl,0.) + vec3(0.1,0.1,1.)*max(-curl,0.);
+        vec2 wrappedPosition = mod(position.xy, RENDERSIZE);
+        float r = IMG_NORM_PIXEL(bufferA_positionAndMass, wrappedPosition / RENDERSIZE).z;
+        gl_FragColor = vec4(sin(1.2 * vec3(1, 2, 3) * r), 1);
     }
 }
